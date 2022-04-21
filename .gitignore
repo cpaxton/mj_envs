@@ -111,3 +111,8 @@ venv.bak/
 _build
 dist
 tags
+
+# vim
+*.swp
+*.swo
+*.swn
