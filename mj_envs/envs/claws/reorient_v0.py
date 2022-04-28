@@ -10,18 +10,20 @@ import gym
 import numpy as np
 
 from mj_envs.envs import env_base
+from mj_envs.utils.quat_math import mat2euler, euler2quat
 
-class PushBaseV0(env_base.MujocoEnv):
+class ReorientBaseV0(env_base.MujocoEnv):
 
     DEFAULT_OBS_KEYS = [
-        'qp', 'qv', 'object_err', 'target_err'
+        'qp', 'qv', 'reach_pos_err', 'reach_rot_err'
     ]
     DEFAULT_RWD_KEYS_AND_WEIGHTS = {
-        "object_dist": -1.0,
-        "target_dist": -1.0,
+        "reach_pos": -1.0,
+        "reach_rot": -0.01,
         "bonus": 4.0,
         "penalty": -50,
     }
+
 
     def __init__(self, model_path, obsd_model_path=None, seed=None, **kwargs):
 
@@ -43,22 +45,22 @@ class PushBaseV0(env_base.MujocoEnv):
 
 
     def _setup(self,
-               robot_site_name,
                object_site_name,
                target_site_name,
                target_xyz_range,
-               frame_skip=40,
-               reward_mode="dense",
+               target_euler_range,
+               frame_skip = 40,
+               reward_mode = "dense",
                obs_keys=DEFAULT_OBS_KEYS,
                weighted_reward_keys=DEFAULT_RWD_KEYS_AND_WEIGHTS,
                **kwargs,
         ):
 
         # ids
-        self.grasp_sid = self.sim.model.site_name2id(robot_site_name)
         self.object_sid = self.sim.model.site_name2id(object_site_name)
         self.target_sid = self.sim.model.site_name2id(target_site_name)
         self.target_xyz_range = target_xyz_range
+        self.target_euler_range = target_euler_range
 
         super()._setup(obs_keys=obs_keys,
                        weighted_reward_keys=weighted_reward_keys,
@@ -66,37 +68,45 @@ class PushBaseV0(env_base.MujocoEnv):
                        frame_skip=frame_skip,
                        **kwargs)
 
+
     def get_obs_dict(self, sim):
         obs_dict = {}
         obs_dict['t'] = np.array([self.sim.data.time])
         obs_dict['qp'] = sim.data.qpos.copy()
         obs_dict['qv'] = sim.data.qvel.copy()
-        obs_dict['object_err'] = sim.data.site_xpos[self.object_sid]-sim.data.site_xpos[self.grasp_sid]
-        obs_dict['target_err'] = sim.data.site_xpos[self.target_sid]-sim.data.site_xpos[self.object_sid]
+        obs_dict['reach_pos_err'] = sim.data.site_xpos[self.target_sid]-sim.data.site_xpos[self.object_sid]
+        obs_dict['reach_rot_err'] = mat2euler(np.reshape(sim.data.site_xmat[self.target_sid],(3,3))) - mat2euler(np.reshape(sim.data.site_xmat[self.object_sid],(3,3)))
         return obs_dict
 
 
     def get_reward_dict(self, obs_dict):
-        object_dist = np.linalg.norm(obs_dict['object_err'], axis=-1)
-        target_dist = np.linalg.norm(obs_dict['target_err'], axis=-1)
-        far_th = 1.25
+        reach_pos_dist = np.linalg.norm(obs_dict['reach_pos_err'], axis=-1)
+        reach_rot_dist = np.linalg.norm(obs_dict['reach_rot_err'], axis=-1)
+        far_th = 1.0
 
         rwd_dict = collections.OrderedDict((
             # Optional Keys
-            ('object_dist',   object_dist),
-            ('target_dist',   target_dist),
-            ('bonus',   (object_dist<.1) + (target_dist<.1) + (target_dist<.05)),
-            ('penalty', (object_dist>far_th)),
+            ('reach_pos',   reach_pos_dist),
+            ('reach_rot',   reach_rot_dist),
+            ('bonus',   (reach_pos_dist<.1) + (reach_pos_dist<.05) + (reach_rot_dist<.3) + (reach_rot_dist<.1)),
+            ('penalty', (reach_pos_dist>far_th)),
             # Must keys
-            ('sparse',  -1.0*target_dist),
-            ('solved',  target_dist<.050),
-            ('done',    object_dist > far_th),
+            ('sparse',  -1.0*reach_pos_dist-1.0*reach_rot_dist),
+            ('solved',  (reach_pos_dist<.050) and (reach_rot_dist<.1)),
+            ('done',    reach_pos_dist > far_th),
         ))
         rwd_dict['dense'] = np.sum([wt*rwd_dict[key] for key, wt in self.rwd_keys_wt.items()], axis=0)
         return rwd_dict
 
     def reset(self):
-        self.sim.model.site_pos[self.target_sid] = self.np_random.uniform(high=self.target_xyz_range['high'], low=self.target_xyz_range['low'])
-        self.sim_obsd.model.site_pos[self.target_sid] = self.sim.model.site_pos[self.target_sid]
+        desired_pos = self.np_random.uniform(high=self.target_xyz_range['high'], low=self.target_xyz_range['low'])
+        self.sim.model.site_pos[self.target_sid] = desired_pos
+        self.sim_obsd.model.site_pos[self.target_sid] = desired_pos
+
+        desired_orien = np.zeros(3)
+        desired_orien = self.np_random.uniform(high=self.target_euler_range['high'], low=self.target_euler_range['low'])
+        self.sim.model.site_quat[self.target_sid] = euler2quat(desired_orien)
+        self.sim_obsd.model.site_quat[self.target_sid] = euler2quat(desired_orien)
+
         obs = super().reset(self.init_qpos, self.init_qvel)
         return obs

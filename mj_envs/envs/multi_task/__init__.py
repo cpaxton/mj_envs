@@ -6,26 +6,7 @@ License :: Under Apache License, Version 2.0 (the "License"); you may not use th
 ================================================= """
 
 import os
-import sys
-from setuptools import setup, find_packages
-
-if sys.version_info.major != 3:
-    print("This Python is only compatible with Python 3, but you are running "
-          "Python {}. The installation will likely fail.".format(sys.version_info.major))
-
-def read(fname):
-    return open(os.path.join(os.path.dirname(__file__), fname)).read()
-
-setup(
-    name='mj_envs',
-    version='0.2.0',
-    packages=find_packages(),
-    description='environments simulated in MuJoCo',
-    long_description=read('README.md'),
-    url='https://github.com/vikashplus/mj_envs.git',
-    author='Movement Control Lab, UW',
-    install_requires=[
-        'click', 'gym==0.13', 'free-mujoco-py', 'termcolor', 'sk-video', 'flatten_dict',
-        'matplotlib', 'ffmpeg'
-    ],
-)
+import mj_envs.envs.multi_task
+import mj_envs.envs.multi_task.substeps1
+import mj_envs.envs.multi_task.substeps2
+import mj_envs.envs.multi_task.substeps9
